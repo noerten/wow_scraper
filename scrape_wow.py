@@ -54,13 +54,6 @@ def get_html(url, page=None, ua=None, proxy_item=None):
         return requests.get(url, headers=headers, proxies=proxy, timeout=5).text
 
 
-def get_number_of_pages_and_items(html, items_per_page=30):
-    soup = make_soup(html)
-    text_with_number = soup.find('span', class_='js-place-count').get_text()
-    number_of_items = int(text_with_number.split()[0])
-    return math.ceil(number_of_items/items_per_page), number_of_items
-
-
 def output_info_to_xlsx(info, filepath):
     header = ['Краткое название', 'Полное название', 'Страна', 'Город', 'Улица',
               'Дом', 'Район', 'Метро', 'Вебсайт', 'Соцсеть', 'Телефон', 'Проблема']
@@ -91,7 +84,7 @@ def get_one_page_chars(page_html):
         chars.append([rank, link, points])
     return chars
 
-def get_blizzard_link(html):
+def extract_blizzard_link(html):
     soup = make_soup(html)
     return soup.find('a', class_='armoryLink').get('href')
 
@@ -118,15 +111,38 @@ def try_get_html_wo_proxy(url, ua=None, proxy_item = None, page=None):
     except:
         return get_html(url, page=page, ua=ua, proxy_item=proxy_item)
 
+def init_page():
+    loaded_page = load_pickle(config.PAGE_PICKLE)
+    return -1 if loaded_page is None else loaded_page
+
+def init_chars(page):
+    active_chars_p = picklize('active_chars', page)
+    loaded_active_chars = load_pickle(active_chars_p)
+    return Vividict() if loaded_active_chars is None else loaded_active_chars
+
+
+def get_blizzard_link(char_link, user_agents):
+    char_url = config.DOMAIN + char_link
+    char_html = try_get_html_wo_proxy(char_url, ua=random.choice(user_agents), proxy_item=None)
+    return extract_blizzard_link(char_html)
+
+
+def get_char_info(blizzard_link, user_agents, proxy):
+    while True:
+        try:
+            blizzard_html = get_html(blizzard_link, ua=random.choice(user_agents), proxy_item=proxy)
+            break
+        except:
+            proxy = random.choice(proxies)
+            print('trying another proxy', proxy)
+    return check_if_active(get_html(blizzard_link))
+
 
 def main():
     user_agents = load_user_agents()
     proxies = load_proxies()
-    loaded_page = load_pickle(config.PAGE_PICKLE)
-    page = -1 if loaded_page is None else loaded_page
-    active_chars_p = picklize('active_chars', page)
-    loaded_active_chars = load_pickle(active_chars_p)
-    active_chars = Vividict() if loaded_active_chars is None else loaded_active_chars
+    page = init_page()
+    active_chars = init_chars(page)
     print('active_chars length', len(active_chars))
     url = config.EU_SEARCH_URL
     while len(active_chars) < 1000:
@@ -135,97 +151,25 @@ def main():
         print('starting to parse page', page)
         page_w_chars_html = try_get_html_wo_proxy(url, page=page, ua=random.choice(user_agents), proxy_item=random.choice(proxies))
         one_page_chars = get_one_page_chars(page_w_chars_html)
+        proxy = None
         for char in one_page_chars:
             print(char[0])
-            char_url = config.DOMAIN + char[1]
-            char_html = try_get_html_wo_proxy(char_url, ua=random.choice(user_agents), proxy_item=None)
-            blizzard_link = get_blizzard_link(char_html)
+            blizzard_link = get_blizzard_link(char[1], user_agents)
             if active_chars[blizzard_link]:
                 print('already_here')
                 continue
-            proxy = None
-            while True:
-                try:
-                    blizzard_html = get_html(blizzard_link, ua=random.choice(user_agents), proxy_item=proxy)
-                    break
-                except:
-                    proxy = random.choice(proxies)
-                    print('trying another proxy', proxy)
-            active = check_if_active(get_html(blizzard_link))
-            print(active, blizzard_link) 
-            if active:
-                name, server = active
+            char_info = get_char_info(blizzard_link, user_agents, proxy)
+            if char_info:    
                 active_chars[blizzard_link]['rank'] = char[0]
                 active_chars[blizzard_link]['points'] = char[2]
-                active_chars[blizzard_link]['name'] = name
-                active_chars[blizzard_link]['server'] = server
+                active_chars[blizzard_link]['name'] = char_info[0]
+                active_chars[blizzard_link]['server'] = char_info[0]
         save_pickle(active_chars, picklize('active_chars', page))
         save_pickle(page, config.PAGE_PICKLE)
         break
         page += 1
     print(active_chars)
     print(len(active_chars))
-
-
-
-
-
-
-
-def ma22in():
-    loaded_countries_dict = load_pickle(config.COUNTRIES_DICT_PICKLE)
-    if loaded_countries_dict is None:
-        print('getting countries_dict')
-        countries_dict = get_all_city_links(get_html(config.ALL_CITIES_LINK),
-                                            config.NEEDED_COUNTRIES)
-        save_pickle(countries_dict, config.COUNTRIES_DICT_PICKLE)
-    else:
-        countries_dict = loaded_countries_dict
-        print('loaded countries_dict')
-    
-    city_dict_list = []
-    for country in countries_dict:
-        if country == 'Украина':# testing
-            print('parsing', country)
-            for city in countries_dict[country]:
-#                if city == 'Одесса':# testing
-                print('parsing', city)
-                url = countries_dict[country][city]
-                number_of_pages, number_of_items = get_number_of_pages_and_items(get_html(url, config.PLACE_TYPE))
-                print(number_of_items, 'places in', city)
-                city_pickle_name = picklize(country, city)
-                loaded_city = load_pickle(city_pickle_name)
-                if loaded_city is None:
-                    city_dict = Vividict()                   
-                    for page in range(1, number_of_pages + 1):
-                        one_page_items = get_places_list(fetch_post_html(url, config.PLACE_TYPE, page))
-                        for item in one_page_items:
-                            city_dict[item[0]]['link'] = item[1]
-#                               print(city_dict[item[0]]['link'])
-                            city_dict[item[0]]['short_name'] = item[0]
-                            place_info = get_detailed_info(get_html(item[1]))
-                            city_dict[item[0]]['full_name'] = place_info[0]
-                            city_dict[item[0]]['city'] = place_info[1]
-                            city_dict[item[0]]['street'] = place_info[2]
-                            city_dict[item[0]]['home'] = place_info[3]
-                            city_dict[item[0]]['district'] = place_info[4]
-                            city_dict[item[0]]['metro'] = place_info[5]
-                            city_dict[item[0]]['website'] = place_info[6]
-                            city_dict[item[0]]['social'] = place_info[7]
-                            city_dict[item[0]]['phone'] = place_info[8]
-                            city_dict[item[0]]['issue'] = place_info[9]
-                            city_dict[item[0]]['country'] = country
-                        show_progress(page, number_of_pages)
-                    
-                    save_pickle(city_dict, city_pickle_name)
-                else:
-                    city_dict = loaded_city
-
-#                    pprint.pprint(city_dict)
-                    city_dict_list.append(city_dict)
-#    print(city_dict_list)
-    output_info_to_xlsx(city_dict_list, 'result.xlsx')
-
     
 
 if __name__ == '__main__':
