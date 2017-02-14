@@ -138,6 +138,18 @@ def get_char_info(blizzard_link, user_agents, proxy):
     return check_if_active(get_html(blizzard_link))
 
 
+def scrape_char(active_chars, char, user_agents, proxy):
+    print(char[0])
+    blizzard_link = get_blizzard_link(char[1], user_agents)
+    if active_chars[blizzard_link]:
+        print('already_here')
+        return
+    char_info = get_char_info(blizzard_link, user_agents, proxy)
+    if char_info:
+        return blizzard_link, char[0], char[2], char_info[0], char_info[1]
+
+    
+
 def main():
     user_agents = load_user_agents()
     proxies = load_proxies()
@@ -153,17 +165,14 @@ def main():
         one_page_chars = get_one_page_chars(page_w_chars_html)
         proxy = None
         for char in one_page_chars:
-            print(char[0])
-            blizzard_link = get_blizzard_link(char[1], user_agents)
-            if active_chars[blizzard_link]:
-                print('already_here')
-                continue
-            char_info = get_char_info(blizzard_link, user_agents, proxy)
+            char_info = scrape_char(active_chars, char, user_agents, proxy)
             if char_info:    
-                active_chars[blizzard_link]['rank'] = char[0]
-                active_chars[blizzard_link]['points'] = char[2]
-                active_chars[blizzard_link]['name'] = char_info[0]
-                active_chars[blizzard_link]['server'] = char_info[0]
+                active_chars[char_info[0]]['rank'] = char_info[1]
+                active_chars[char_info[0]]['points'] = char_info[2]
+                active_chars[char_info[0]]['name'] = char_info[3]
+                active_chars[char_info[0]]['server'] = char_info[4]
+                print(active_chars[char_info[0]])
+        
         save_pickle(active_chars, picklize('active_chars', page))
         save_pickle(page, config.PAGE_PICKLE)
         break
